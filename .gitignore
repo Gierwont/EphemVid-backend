@@ -1,0 +1,19 @@
+# Node modules
+node_modules/
+
+# Pliki środowiskowe
+.env
+
+# Folder z buildem (output kompilacji)
+dist/
+
+# Pliki tymczasowe TypeScript
+*.tsbuildinfo
+
+# Logi
+npm-debug.log*
+yarn-debug.log*
+
+# Pliki edytorów / systemowe
+.vscode/
+.DS_Store
