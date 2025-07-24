@@ -12,7 +12,7 @@ declare global {
 }
 const JWT_SECRET = process.env.JWT_SECRET;
 
-export function auth(req: Request, res: Response, next: NextFunction) {
+function auth(req: Request, res: Response, next: NextFunction) {
 	const token = req.cookies?.token as string | undefined;
 	const fingerprint = req.cookies?.fingerprint as string;
 	if (!JWT_SECRET) {
@@ -57,3 +57,5 @@ export function auth(req: Request, res: Response, next: NextFunction) {
 	req.userId = newUserId;
 	next();
 }
+
+export default auth;
