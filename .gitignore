@@ -17,3 +17,7 @@ yarn-debug.log*
 # Pliki edytorów / systemowe
 .vscode/
 .DS_Store
+
+#baza
+app.db
+storage/
