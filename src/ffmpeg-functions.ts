@@ -27,3 +27,17 @@ export function getInfo(path: string): Promise<{ duration: number; size: number 
 		});
 	});
 }
+
+export function createGif(path: string, outputPath: string) {
+	return new Promise<void>((resolve, reject) => {
+		const command = `ffmpeg -i ${path} -vf "fps=15,scale=480:-1:flags=lanczos" -loop 0 ${outputPath}`;
+
+		exec(command, { timeout: 60000 }, (error, stdout, stderr) => {
+			if (error) {
+				console.error('FFmpeg error while creating gif:', stderr);
+				return reject(error);
+			}
+			resolve();
+		});
+	});
+}
