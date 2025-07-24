@@ -1,4 +1,4 @@
-export interface editBodyOptions {
+export interface editOptions {
 	id: number;
 	startTime?: number;
 	endTime?: number;
@@ -7,4 +7,13 @@ export interface editBodyOptions {
 	cropY?: number;
 	cropWidth?: number;
 	cropHeight?: number;
+}
+
+export interface Video {
+	id: number;
+	filename: string;
+	created_at: number;
+	duration?: number;
+	size?: number;
+	user_id: string;
 }

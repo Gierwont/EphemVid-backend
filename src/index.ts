@@ -5,12 +5,13 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import cors from 'cors';
 import upload from './multer-config.js';
-import { getInfo, createGif } from './ffmpeg-functions.js';
+import { getInfo, createGif, ffmpegEdit } from './ffmpeg-functions.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { db_init, db } from './db.js';
 import auth from './auth.js';
 import deleteOldFiles from './interval-function.js';
+import { editOptions, Video } from './interfaces.js';
 
 const strictLimiter = rateLimit({
 	windowMs: 60 * 1000,
@@ -39,6 +40,8 @@ app.use(
 	})
 );
 db_init();
+
+deleteOldFiles();
 setInterval(() => {
 	deleteOldFiles();
 }, 24 * 60 * 60 * 1000);
@@ -133,6 +136,69 @@ app.get('/download/gif/:filename', auth, strictLimiter, async (req, res) => {
 			res.status(500).json({ message: 'Error while creating gif' });
 		}
 	}
+});
+//edit video endpoint
+app.patch('/edit', strictLimiter, async (req, res) => {
+	const options: editOptions = req.body;
+	if (!options.id) {
+		console.error('No id : edit endpoint');
+		res.status(400).json({ message: 'Video id is missing' });
+		return;
+	}
+	const video = db.prepare('SELECT * FROM videos WHERE id = ?').get(options.id) as Video | undefined;
+
+	if (!video || !video.duration) {
+		res.status(404).json({ message: 'Cannot edit : video not found' });
+		return;
+	}
+	const filePath = path.join(process.cwd(), 'storage', video.filename);
+	const tempOutput = path.join(process.cwd(), 'storage', 'temp_' + video.filename);
+	try {
+		await fs.access(filePath);
+	} catch (err) {
+		console.error('Trying to edit file that doesnt exist: ', err);
+		res.status(404).json({ message: 'File not found' });
+		return;
+	}
+
+	try {
+		await ffmpegEdit(options, video.duration, filePath, tempOutput);
+		await fs.rename(tempOutput, filePath);
+		const info = await getInfo(filePath);
+		db.prepare(`UPDATE videos SET duration = ?,size= ? WHERE id = ? `).run(info.duration, info.size, video.id);
+		res.status(200).json({ message: 'succesfully edited video' });
+	} catch (err) {
+		console.error(err);
+		res.status(500).json({ message: 'Something went wrong during editing' });
+	}
+});
+//delete video endpoint
+app.delete('/delete/:id', softLimiter, async (req, res) => {
+	const id = req.params.id;
+	const result = db.prepare('SELECT filename FROM videos WHERE id = ?').get(id) as { filename: string } | undefined;
+	if (!result) {
+		res.status(404).json({ message: "Video doesn't exist" });
+		return;
+	}
+	const filePath = path.join(process.cwd(), 'storage', result.filename);
+
+	try {
+		await fs.access(filePath);
+		await fs.unlink(filePath);
+	} catch {
+		console.warn('File not found on disk, deleting from DB anyway');
+		res.status(404).json({ message: "File doesn't exist" });
+		return;
+	}
+	//delete gif if exists
+	try {
+		await fs.access(filePath.replace('.mp4', '.gif'));
+		await fs.unlink(filePath.replace('.mp4', '.gif'));
+	} catch {}
+
+	db.prepare('DELETE FROM videos WHERE filename = ?').run(result.filename.replace('.mp4', '.gif'));
+	db.prepare('DELETE FROM videos WHERE id = ?').run(id);
+	res.status(200).json({ message: 'Video deleted' });
 });
 
 app.listen(port, () => {
