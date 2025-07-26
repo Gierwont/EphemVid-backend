@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import path from 'path';
 import { editOptions } from './interfaces';
 import { error } from 'console';
@@ -81,10 +81,14 @@ export function ffmpegEdit(options: editOptions, duration: number, inputPath: st
 			if (videoBitrate <= 0) {
 				return reject(new Error('New bitrate is too low , increase bitrate or shorten the video'));
 			}
-			command += ` -c:v libx264 -preset fast -b:v ${videoBitrate}k -maxrate ${videoBitrate}k -bufsize ${videoBitrate * 2}k -c:a aac -b:a ${audioBitrate}k`;
+
+			if (path.extname(outputPath).toLowerCase() === '.webm') {
+				command += ` -c:v libvpx-vp9 -b:v ${videoBitrate}k -c:a libopus -b:a ${audioBitrate}k`;
+			} else {
+				command += ` -c:v libx264 -preset fast -b:v ${videoBitrate}k -maxrate ${videoBitrate}k -bufsize ${videoBitrate * 2}k -c:a aac -b:a ${audioBitrate}k`;
+			}
 		}
 		command += ` "${outputPath}"`;
-
 		exec(command, { timeout: 80000 }, (error, stdout, stderr) => {
 			if (error) {
 				console.error('FFmpeg error:', stderr || error.message);
@@ -93,4 +97,49 @@ export function ffmpegEdit(options: editOptions, duration: number, inputPath: st
 			resolve();
 		});
 	});
+}
+
+export function ffmpegDownload(inputPath: string, extension: string) {
+	const outputFormat = extension.toLowerCase();
+	const args = ['-i', inputPath];
+
+	args.push('-movflags', 'frag_keyframe+empty_moov');
+	args.push('-f', 'mp4');
+
+	switch (outputFormat) {
+		case 'webm':
+			args.push('-f', 'webm', '-c:v', 'libvpx', '-c:a', 'libvorbis');
+			break;
+		case 'mp4':
+			args.push('-f', 'mp4', '-c:v', 'libx264', '-c:a', 'aac');
+			break;
+		case 'mkv':
+			args.push('-f', 'matroska', '-c:v', 'libx264', '-c:a', 'aac');
+			break;
+		case 'avi':
+			args.push('-f', 'avi', '-c:v', 'mpeg4', '-c:a', 'mp3');
+			break;
+		case 'mov':
+			args.push('-f', 'mov', '-c:v', 'libx264', '-c:a', 'aac');
+			break;
+		case 'gif':
+			args.push(
+				'-vf',
+				'fps=15,scale=640:-1:flags=lanczos',
+				'-f',
+				'gif',
+				'-loop',
+				'0', // Nieskończona pętla (typowe dla GIFów)
+				'-an', // Wyłączenie audio (GIF nie obsługuje dźwięku)
+				'-pix_fmt',
+				'rgb24' // Lepsza kompatybilność kolorów
+			);
+			break;
+		default:
+			throw new Error(`Unsupported format: ${outputFormat}`);
+	}
+
+	args.push('-');
+
+	return spawn('ffmpeg', args);
 }

@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import cors from 'cors';
 import upload from './multer-config.js';
-import { getInfo, createGif, ffmpegEdit } from './ffmpeg-functions.js';
+import { getInfo, ffmpegEdit, ffmpegDownload } from './ffmpeg-functions.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { db_init, db } from './db.js';
@@ -108,35 +108,50 @@ app.get('/file/single/:filename', softLimiter, async (req, res) => {
 	}
 });
 
-//download gif endpoint
-app.get('/download/gif/:filename', auth, strictLimiter, async (req, res) => {
+//download endpoint
+app.get('/download/:extension/:filename', auth, strictLimiter, async (req, res) => {
+	const extension = req.params.extension;
 	const filename = req.params.filename;
-	if (filename.includes('..') || path.extname(filename) != '.mp4') {
-		res.status(400).json({ message: 'Wrong filename' });
-		console.error('Wrong filename: downloading gif endpoint');
+	if (filename.includes('..') || extension.includes('..')) {
+		res.status(400).json({ message: 'Wrong extension or filename' });
+		console.error('Wrong filename or extension: downloading gif endpoint');
 		return;
 	}
-	const input = path.join(process.cwd(), 'storage', filename);
-	const output = path.join(process.cwd(), 'storage', filename.replace('.mp4', '.gif'));
-	const searchedGif = db.prepare('SELECT COUNT(*) as count FROM videos WHERE filename = ?').get(filename.replace('.mp4', '.gif')) as { count: number };
-	if (searchedGif.count == 1) {
-		console.log('Gif already exists no need to create new one : download gif endpoint');
-		res.status(200).download(output);
-		return;
-	} else {
-		try {
-			await fs.access(input);
-			await createGif(input, output);
-			console.log('Created gif');
-			db.prepare('INSERT INTO videos (filename,created_at,duration,size,user_id) VALUES (?,?,?,?,?)').run(filename.replace('.mp4', '.gif'), Date.now(), null, null, req.userId);
 
-			res.status(200).download(output);
+	const input = path.join(process.cwd(), 'storage', filename);
+
+	try {
+		await fs.access(input);
+	} catch (err) {
+		res.status(404).json({ message: 'File does not exist' });
+		return;
+	}
+
+	if ('.' + extension == path.extname(filename)) {
+		res.status(200).download(input);
+	} else {
+		const baseName = path.basename(filename, path.extname(filename));
+		const outputName = `${baseName}.${extension}`;
+		try {
+			const ffmpeg = ffmpegDownload(input, extension);
+
+			res.setHeader('Content-Disposition', `attachment; filename="${outputName}"`);
+
+			ffmpeg.stdout.pipe(res);
+
+			ffmpeg.on('error', err => {
+				console.error('ffmpeg error:', err);
+				if (!res.headersSent) {
+					res.status(500).end('FFmpeg failed');
+				}
+			});
 		} catch (err) {
-			console.error(err);
-			res.status(500).json({ message: 'Error while creating gif' });
+			console.error('Streaming failed in download endpoint:', err);
+			res.status(500).json({ message: 'Error while streaming file' });
 		}
 	}
 });
+
 //edit video endpoint
 app.patch('/edit', strictLimiter, async (req, res) => {
 	const options: editOptions = req.body;
@@ -190,13 +205,7 @@ app.delete('/delete/:id', softLimiter, async (req, res) => {
 		res.status(404).json({ message: "File doesn't exist" });
 		return;
 	}
-	//delete gif if exists
-	try {
-		await fs.access(filePath.replace('.mp4', '.gif'));
-		await fs.unlink(filePath.replace('.mp4', '.gif'));
-	} catch {}
 
-	db.prepare('DELETE FROM videos WHERE filename = ?').run(result.filename.replace('.mp4', '.gif'));
 	db.prepare('DELETE FROM videos WHERE id = ?').run(id);
 	res.status(200).json({ message: 'Video deleted' });
 });
