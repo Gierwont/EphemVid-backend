@@ -10,15 +10,20 @@ const storage = multer.diskStorage({
 		const extName = path.extname(file.originalname);
 		const sanitizeFilename = (name: string) => name.replace(/[^a-zA-Z0-9\-_.]/g, '');
 		const baseName = sanitizeFilename(path.basename(file.originalname, extName));
-		const randomSuffix = randomBytes(4).toString('hex');
+		const randomSuffix = randomBytes(2).toString('hex');
 		cb(null, `${baseName}_${randomSuffix}${extName}`);
 	}
 });
 
 const fileFilter = (req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-	// const supportedMimetypes = ['audio/mpeg' , 'video/mp4' , 'image/png' , 'image.jpeg']
-	const supportedMimetypes = ['video/mp4'];
-	const supportedExtensions = ['.mp4'];
+	// const supportedMimetypes = ['video/mp4'];
+	// const supportedExtensions = ['.mp4'];
+	const supportedMimetypes = [
+		'video/mp4',
+		'video/quicktime', // .mov
+		'video/webm'
+	];
+	const supportedExtensions = ['.mp4', '.mov', '.mkv', '.avi', '.webm'];
 
 	if (supportedMimetypes.includes(file.mimetype) && supportedExtensions.includes(path.extname(file.originalname).toLowerCase())) {
 		cb(null, true);
