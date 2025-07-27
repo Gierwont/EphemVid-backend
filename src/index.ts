@@ -47,7 +47,6 @@ setInterval(() => {
 }, 24 * 60 * 60 * 1000);
 //-------------------------------------------------------------------
 //upload endpoint
-
 app.post('/upload', auth, strictLimiter, (req, res) => {
 	const videos = db.prepare(`SELECT COUNT(*) as count FROM videos WHERE user_id = ?  AND filename NOT LIKE '%.gif'`).get(req.userId) as { count: number };
 	if (videos.count >= 10) {
@@ -77,6 +76,11 @@ app.post('/upload', auth, strictLimiter, (req, res) => {
 			});
 		} catch (err) {
 			console.error(err);
+			try {
+				await fs.unlink(req.file.path);
+			} catch (err) {
+				console.error('Error deleting file:', err);
+			}
 			res.status(500).json({ message: 'Error while processing file' });
 		}
 	});
