@@ -40,8 +40,7 @@ function auth(req: Request, res: Response, next: NextFunction) {
 
 	const fingerprints = db.prepare('SELECT COUNT(*) as count FROM users WHERE fingerprint = ?').get(fingerprint) as { count: number };
 	if (fingerprints.count >= 3) {
-		res.status(403).json({ error: 'Too many accounts from this device ,try again later' });
-		// next();
+		res.status(403).json({ message: 'Too many accounts from this device ,try again later' });
 		return;
 	}
 	const newUserId = uuidv4();
