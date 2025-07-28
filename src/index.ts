@@ -179,7 +179,6 @@ app.patch('/edit', strictLimiter, async (req, res) => {
 		res.status(404).json({ message: 'File not found' });
 		return;
 	}
-
 	try {
 		await ffmpegEdit(options, video.duration, filePath, tempOutput);
 		await fs.rename(tempOutput, filePath);
@@ -188,7 +187,16 @@ app.patch('/edit', strictLimiter, async (req, res) => {
 		res.status(200).json({ message: 'succesfully edited video' });
 	} catch (err) {
 		console.error(err);
-		res.status(500).json({ message: 'Something went wrong during editing' });
+		try {
+			await fs.unlink(tempOutput);
+		} catch (unlinkErr) {
+			console.error('Failed to delete temp file:', unlinkErr);
+		}
+		if (err instanceof Error && err.message.includes('New bitrate is too low, increase bitrate or shorten the video')) {
+			res.status(400).json({ message: 'New bitrate is too low — increase bitrate or shorten the video.' });
+		} else {
+			res.status(500).json({ message: 'Something went wrong during editing' });
+		}
 	}
 });
 //delete video endpoint

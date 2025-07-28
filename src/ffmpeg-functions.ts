@@ -1,6 +1,10 @@
 import { exec, spawn } from 'child_process';
 import path from 'path';
 import { editOptions } from './interfaces';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
+
 function secondsToTime(seconds: number) {
 	const hrs = Math.floor(seconds / 3600);
 	const mins = Math.floor((seconds % 3600) / 60);
@@ -46,8 +50,9 @@ export function getInfo(path: string): Promise<{ duration: number; size: number 
 }
 
 export function ffmpegEdit(options: editOptions, duration: number, inputPath: string, outputPath: string) {
-	return new Promise<void>((resolve, reject) => {
+	return new Promise<void>(async (resolve, reject) => {
 		let command = `ffmpeg -i "${inputPath}"`;
+		//cut video
 		if (options.startTime !== undefined && options.endTime !== undefined) {
 			if (options.startTime > options.endTime || options.startTime < 0 || options.endTime < 0) {
 				return reject(new Error('Timestamps to cut video are invalid'));
@@ -58,31 +63,40 @@ export function ffmpegEdit(options: editOptions, duration: number, inputPath: st
 				return reject(new Error('Invalid duration for compression'));
 			}
 		}
-
+		//crop video
 		if (options.cropX !== undefined && options.cropY !== undefined && options.cropWidth !== undefined && options.cropHeight !== undefined) {
 			command += ` -filter:v "crop=${options.cropWidth}:${options.cropHeight}:${options.cropX}:${options.cropY}"`;
 		}
-
+		//compress video
 		if (options.compressTo !== undefined) {
 			if (options.compressTo <= 0) {
 				return reject(new Error('Wrong size to compress'));
 			}
-			if (path.extname(inputPath).toLowerCase() == '.gif') {
-				return reject(new Error('Cannot compress gifs'));
+			if (!duration || duration <= 0) {
+				return reject(new Error('Invalid video duration'));
 			}
-			const newBitrate = Math.floor((options.compressTo * 8) / Math.ceil(duration));
-			const audioBitrate = 96; //KBps
-			const videoBitrate = newBitrate - audioBitrate;
+			//check for audio and calculate bitrates
+			const { stdout } = await execAsync(`ffprobe -i "${inputPath}" -show_streams -select_streams a -loglevel error`);
+			const hasAudio = /codec_type=audio/.test(stdout) && /bit_rate=\d+/.test(stdout) && /channels=\d+/.test(stdout) && !/disposition=attached_pic/.test(stdout);
+
+			const targetSizeWithMargin = options.compressTo * 0.95;
+
+			const totalBitrate = Math.floor((targetSizeWithMargin * 8) / Math.ceil(duration));
+
+			const audioBitrate = hasAudio ? Math.min(128, Math.max(64, Math.floor(totalBitrate * 0.15))) : 0;
+			const videoBitrate = totalBitrate - audioBitrate;
+
 			if (videoBitrate <= 0) {
-				return reject(new Error('New bitrate is too low , increase bitrate or shorten the video'));
+				return reject(new Error('New bitrate is too low, increase bitrate or shorten the video'));
 			}
 
 			if (path.extname(outputPath).toLowerCase() === '.webm') {
-				command += ` -c:v libvpx-vp9 -b:v ${videoBitrate}k -c:a libopus -b:a ${audioBitrate}k`;
+				command += ` -c:v libvpx-vp9 -b:v ${videoBitrate}k -crf 24 -maxrate ${videoBitrate}k -bufsize ${videoBitrate * 2}k -c:a libopus -b:a ${audioBitrate}k`;
 			} else {
-				command += ` -c:v libx264 -preset fast -b:v ${videoBitrate}k -maxrate ${videoBitrate}k -bufsize ${videoBitrate * 2}k -c:a aac -b:a ${audioBitrate}k`;
+				command += ` -c:v libx264 -preset fast -b:v ${videoBitrate}k -maxrate ${videoBitrate}k -bufsize ${videoBitrate * 2}k -movflags +faststart -c:a aac -b:a ${audioBitrate}k`;
 			}
 		}
+
 		command += ` "${outputPath}"`;
 		exec(command, { timeout: 80000 }, (error, stdout, stderr) => {
 			if (error) {

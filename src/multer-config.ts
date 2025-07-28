@@ -16,14 +16,12 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-	// const supportedMimetypes = ['video/mp4'];
-	// const supportedExtensions = ['.mp4'];
 	const supportedMimetypes = [
 		'video/mp4',
 		'video/quicktime', // .mov
 		'video/webm'
 	];
-	const supportedExtensions = ['.mp4', '.mov', '.mkv', '.avi', '.webm'];
+	const supportedExtensions = ['.mp4', '.mov', '.webm'];
 
 	if (supportedMimetypes.includes(file.mimetype) && supportedExtensions.includes(path.extname(file.originalname).toLowerCase())) {
 		cb(null, true);
