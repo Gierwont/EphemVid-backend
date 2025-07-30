@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs/promises';
-import { db } from './db';
+import { db } from './db.js';
 
 async function deleteOldFiles() {
 	const now = Date.now();
