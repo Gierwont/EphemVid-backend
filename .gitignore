@@ -21,3 +21,4 @@ yarn-debug.log*
 #baza
 app.db
 storage/
+docker-compose.yml
