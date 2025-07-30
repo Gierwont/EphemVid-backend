@@ -8,8 +8,6 @@ RUN npm run build
 RUN useradd app
 USER app
 
-ENV JWT_SECRET=
-ENV port=
-ENV front_url=
+EXPOSE 3000
 
 CMD ["npm","start"]
