@@ -50,7 +50,7 @@ function auth(req: Request, res: Response, next: NextFunction) {
 	res.cookie('token', newToken, {
 		httpOnly: true,
 		sameSite: 'lax',
-		secure: false, // true w HTTPS
+		secure: true, // true w HTTPS
 		maxAge: 1000 * 60 * 60 * 24
 	});
 	req.userId = newUserId;

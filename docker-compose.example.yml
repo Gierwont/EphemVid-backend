@@ -1,6 +1,12 @@
 services:
-  app:
+  ephemvid-backend:
+    restart: always
+    ports:
+      - 3000:3000
     build: .
+    volumes:
+      - /etc/letsencrypt/live/[domain]/fullchain.pem:/certs/fullchain.pem:ro
+      - /etc/letsencrypt/live/[domain]/privkey.pem:/certs/privkey.pem:ro
     environment:
       - JWT_SECRET=
       - port=3000

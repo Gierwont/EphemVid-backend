@@ -1,18 +1,19 @@
-import cookieParser from 'cookie-parser'
-import cors from 'cors'
-import 'dotenv/config'
-import express from 'express'
-import rateLimit from 'express-rate-limit'
-import fs from 'fs/promises'
-import helmet from 'helmet'
-import https from 'https'
-import path from 'path'
-import auth from './auth.js'
-import { db, db_init } from './db.js'
-import { ffmpegDownload, ffmpegEdit, getInfo } from './ffmpeg-functions.js'
-import { editOptions, Video } from './interfaces.js'
-import deleteOldFiles from './interval-function.js'
-import upload from './multer-config.js'
+import 'dotenv/config';
+import rateLimit from 'express-rate-limit';
+import express from 'express';
+import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import cors from 'cors';
+import upload from './multer-config.js';
+import { getInfo, ffmpegEdit, ffmpegDownload } from './ffmpeg-functions.js';
+import fs from 'fs/promises';
+import path from 'path';
+import { db_init, db } from './db.js';
+import auth from './auth.js';
+import deleteOldFiles from './interval-function.js';
+import { editOptions, Video } from './interfaces.js';
+import https from 'https';
+
 
 const strictLimiter = rateLimit({
         windowMs: 60 * 1000,
@@ -91,10 +92,12 @@ app.post('/upload', auth, strictLimiter, (req, res) => {
 
 //get all filenames
 app.get('/all', auth, softLimiter, (req, res) => {
-        const getDirectory = db.prepare(`SELECT id,filename,created_at,duration,size FROM videos WHERE user_id = ? AND filename NOT LIKE '%.gif' ORDER BY created_at DESC`)
-        const videos = getDirectory.all(req.userId)
-        res.status(200).json(videos)
-})
+
+	const getDirectory = db.prepare(`SELECT id,filename,created_at,duration,size FROM videos WHERE user_id = ? ORDER BY created_at DESC`);
+	const videos = getDirectory.all(req.userId);
+	res.status(200).json(videos);
+});
+
 
 //serve 1 file endpoint
 app.get('/file/single/:filename', softLimiter, async (req, res) => {
@@ -204,39 +207,39 @@ app.patch('/edit', strictLimiter, async (req, res) => {
 })
 //delete video endpoint
 app.delete('/delete/:id', softLimiter, async (req, res) => {
-        const id = req.params.id
-        const result = db.prepare('SELECT filename FROM videos WHERE id = ?').get(id) as { filename: string } | undefined
-        if (!result) {
-                res.status(404).json({ message: "Video doesn't exist" })
-                return
-        }
-        const filePath = path.join(process.cwd(), 'storage', result.filename)
+	const id = req.params.id;
+	const result = db.prepare('SELECT filename FROM videos WHERE id = ?').get(id) as { filename: string } | undefined;
+	if (!result) {
+		res.status(404).json({ message: "Video doesn't exist" });
+		return;
+	}
+	const filePath = path.join(process.cwd(), 'storage', result.filename);
 
-        try {
-                await fs.access(filePath)
-                await fs.unlink(filePath)
-        } catch {
-                console.warn('File not found on disk, deleting from DB anyway')
-                res.status(404).json({ message: "File doesn't exist" })
-                return
-        }
+	try {
+		await fs.access(filePath);
+		await fs.unlink(filePath);
+	} catch {
+		console.warn('File not found on disk, deleting from DB anyway');
+		res.status(404).json({ message: "File doesn't exist" });
+		return;
+	}
 
-        db.prepare('DELETE FROM videos WHERE id = ?').run(id)
-        res.status(200).json({ message: 'Video deleted' })
-})
+	db.prepare('DELETE FROM videos WHERE id = ?').run(id);
+	res.status(200).json({ message: 'Video deleted' });
+});
 
+if (process.env.SSL_ENABLE === 'true') {
+	const sslOptions = {
+		key: await fs.readFile(process.env.KEY_PATH!),
+		cert: await fs.readFile(process.env.CERT_PATH!)
+	};
 
-if (process.env.SSL_ENABLE === "true") {
-        const sslOptions = {
-                key: await fs.readFile(process.env.CERT_PATH!),
-                cert: await fs.readFile(process.env.KEY_PATH!)
-        }
-
-        https.createServer(sslOptions, app).listen(port, () => {
-                console.log(`SSL server running at https://localhost:${port}`)
-        })
+	https.createServer(sslOptions, app).listen(port, () => {
+		console.log(`SSL server running at https://localhost:${port}`);
+	});
 } else {
-        app.listen(port, () => {
-                console.log(`Server running at http://localhost:${port}`)
-        })
+	app.listen(port, () => {
+		console.log(`Server running at http://localhost:${port}`);
+	});
+
 }
