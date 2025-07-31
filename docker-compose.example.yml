@@ -5,3 +5,6 @@ services:
       - JWT_SECRET=
       - port=3000
       - front_url=http://localhost:5173
+      - SSL_ENABLE=false
+      - CERT_PATH=
+      - KEY_PATH=
