@@ -12,6 +12,7 @@ import { db_init, db } from './db.js';
 import auth from './auth.js';
 import deleteOldFiles from './interval-function.js';
 import { editOptions, Video } from './interfaces.js';
+import https from 'https';
 
 const strictLimiter = rateLimit({
 	windowMs: 60 * 1000,
@@ -88,7 +89,7 @@ app.post('/upload', auth, strictLimiter, (req, res) => {
 
 //get all filenames
 app.get('/all', auth, softLimiter, (req, res) => {
-	const getDirectory = db.prepare(`SELECT id,filename,created_at,duration,size FROM videos WHERE user_id = ? AND filename NOT LIKE '%.gif' ORDER BY created_at DESC`);
+	const getDirectory = db.prepare(`SELECT id,filename,created_at,duration,size FROM videos WHERE user_id = ? ORDER BY created_at DESC`);
 	const videos = getDirectory.all(req.userId);
 	res.status(200).json(videos);
 });
@@ -222,6 +223,17 @@ app.delete('/delete/:id', softLimiter, async (req, res) => {
 	res.status(200).json({ message: 'Video deleted' });
 });
 
-app.listen(port, () => {
-	console.log(`Server running at http://localhost:${port}`);
-});
+if (process.env.SSL_ENABLE === 'true') {
+	const sslOptions = {
+		key: await fs.readFile(process.env.KEY_PATH!),
+		cert: await fs.readFile(process.env.CERT_PATH!)
+	};
+
+	https.createServer(sslOptions, app).listen(port, () => {
+		console.log(`SSL server running at https://localhost:${port}`);
+	});
+} else {
+	app.listen(port, () => {
+		console.log(`Server running at http://localhost:${port}`);
+	});
+}
