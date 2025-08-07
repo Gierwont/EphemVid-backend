@@ -118,7 +118,7 @@ export function ffmpegDownload(inputPath: string, extension: string) {
 			args.push('-f', 'webm', '-c:v', 'libvpx-vp9', '-deadline', 'realtime', '-speed', '4', '-c:a', 'libopus');
 			break;
 		case 'mp4':
-			args.push('-f', 'mp4', '-c:v', 'libx264', '-c:a', 'aac');
+			args.push('-f', 'mp4', '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart');
 			break;
 		case 'mkv':
 			args.push('-f', 'matroska', '-c:v', 'libx264', '-c:a', 'aac');
@@ -127,7 +127,7 @@ export function ffmpegDownload(inputPath: string, extension: string) {
 			args.push('-f', 'avi', '-c:v', 'mpeg4', '-c:a', 'mp3');
 			break;
 		case 'mov':
-			args.push('-f', 'mov', '-c:v', 'libx264', '-c:a', 'aac');
+			args.push('-f', 'mov', '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart');
 			break;
 		case 'gif':
 			args.push('-vf', 'fps=15,scale=640:-1:flags=lanczos', '-f', 'gif', '-loop', '0', '-an', '-pix_fmt', 'rgb24');

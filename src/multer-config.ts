@@ -14,6 +14,7 @@ const storage = multer.diskStorage({
 		cb(null, `${baseName}_${randomSuffix}${extName}`);
 	}
 });
+// const storage = multer.memoryStorage();
 
 const fileFilter = (req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
 	const supportedMimetypes = [
