@@ -13,6 +13,11 @@ import auth from './auth.js';
 import deleteOldFiles from './interval-function.js';
 import { editOptions, Video } from './interfaces.js';
 import https from 'https';
+import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import util from 'util';
+import stream from 'stream';
+import type { GetObjectCommandOutput } from '@aws-sdk/client-s3';
+import { createWriteStream, write } from 'fs';
 
 const strictLimiter = rateLimit({
 	windowMs: 60 * 1000,
@@ -26,12 +31,12 @@ const softLimiter = rateLimit({
 });
 
 const app = express();
-const port = process.env.port;
+const port = process.env.PORT;
 app.use(express.json());
 app.use(cookieParser());
 app.use(
 	cors({
-		origin: process.env.front_url,
+		origin: process.env.FRONT_URL,
 		credentials: true
 	})
 );
@@ -46,10 +51,24 @@ deleteOldFiles();
 setInterval(() => {
 	deleteOldFiles();
 }, 24 * 60 * 60 * 1000);
+const pipeline = util.promisify(stream.pipeline);
+
+//-----------------------------------------------------------------s3 config
+if (!process.env.ACCESS_KEY_ID || !process.env.SECRET_ACCESS_KEY) {
+	throw new Error('Missing CloudFlare credentials in environment variable');
+}
+const S3 = new S3Client({
+	region: 'auto',
+	endpoint: `https://${process.env.ACCOUNT_ID}.r2.cloudflarestorage.com`,
+	credentials: {
+		accessKeyId: process.env.ACCESS_KEY_ID,
+		secretAccessKey: process.env.SECRET_ACCESS_KEY
+	}
+});
 //-------------------------------------------------------------------
 //upload endpoint
 app.post('/upload', auth, strictLimiter, (req, res) => {
-	const videos = db.prepare(`SELECT COUNT(*) as count FROM videos WHERE user_id = ?  AND filename NOT LIKE '%.gif'`).get(req.userId) as { count: number };
+	const videos = db.prepare(`SELECT COUNT(*) as count FROM videos WHERE user_id = ?`).get(req.userId) as { count: number };
 	if (videos.count >= 10) {
 		console.error('Too many files');
 		res.status(401).json({ message: 'Reached 10 files limit' });
@@ -72,17 +91,26 @@ app.post('/upload', auth, strictLimiter, (req, res) => {
 		try {
 			const info = await getInfo(req.file.path);
 			db.prepare('INSERT INTO videos (filename,created_at,duration,size,user_id) VALUES (?,?,?,?,?)').run(req.file.filename, Date.now(), info.duration, info.size, req.userId);
+			const fileContent = await fs.readFile(req.file.path);
+			const uploadParams = {
+				Bucket: 'ephemvid',
+				Key: req.file.filename,
+				Body: fileContent,
+				ContentType: req.file.mimetype
+			};
+			const data = await S3.send(new PutObjectCommand(uploadParams));
 			res.status(200).json({
 				message: 'File uploaded succesfully'
 			});
 		} catch (err) {
 			console.error(err);
+			res.status(500).json({ message: 'Error while processing file' });
+		} finally {
 			try {
 				await fs.unlink(req.file.path);
 			} catch (err) {
 				console.error('Error deleting file:', err);
 			}
-			res.status(500).json({ message: 'Error while processing file' });
 		}
 	});
 });
@@ -103,13 +131,26 @@ app.get('/file/single/:filename', softLimiter, async (req, res) => {
 		return;
 	}
 
-	const filePath = path.join(process.cwd(), 'storage', filename);
-
 	try {
-		await fs.access(filePath);
-		res.status(200).sendFile(filePath);
-	} catch {
-		res.status(404).json({ message: 'File does not exist' });
+		const command = new GetObjectCommand({
+			Bucket: 'ephemvid',
+			Key: filename
+		});
+		const data = await S3.send(command);
+
+		if (data.ContentType) {
+			res.setHeader('Content-Type', data.ContentType);
+		}
+		if (data.ContentLength) {
+			res.setHeader('Content-Length', data.ContentLength.toString());
+		}
+		res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+
+		await pipeline(data.Body as stream.Readable, res);
+	} catch (err) {
+		console.error('Error streaming file:', err);
+		res.status(404).json({ message: 'File does not exist or cannot be read' });
+		return;
 	}
 });
 
@@ -119,25 +160,47 @@ app.get('/download/:extension/:filename', auth, strictLimiter, async (req, res) 
 	const filename = req.params.filename;
 	if (filename.includes('..') || extension.includes('..')) {
 		res.status(400).json({ message: 'Wrong extension or filename' });
-		console.error('Wrong filename or extension: downloading gif endpoint');
+		console.error('Wrong filename or extension: downloading endpoint');
 		return;
 	}
 
-	const input = path.join(process.cwd(), 'storage', filename);
-
+	let data: GetObjectCommandOutput;
 	try {
-		await fs.access(input);
+		const command = new GetObjectCommand({
+			Bucket: 'ephemvid',
+			Key: filename
+		});
+		data = await S3.send(command);
 	} catch (err) {
-		res.status(404).json({ message: 'File does not exist' });
+		console.error('Error reading file:', err);
+		res.status(404).json({ message: 'File does not exist or cannot be read' });
 		return;
 	}
 
+	//if target download ext == original ext , just stream it to user
 	if ('.' + extension == path.extname(filename)) {
-		res.status(200).download(input);
-	} else {
+		res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+		if (data.ContentType) {
+			res.setHeader('Content-Type', data.ContentType);
+		}
+		if (data.ContentLength) {
+			res.setHeader('Content-Length', data.ContentLength.toString());
+		}
+		try {
+			await pipeline(data.Body as stream.Readable, res);
+		} catch (err) {
+			console.error('Error streaming file:', err, '    download endpoint');
+		}
+	}
+	//if user requests changing extension , download it and stream it
+	else {
 		const baseName = path.basename(filename, path.extname(filename));
+		const input = path.join(process.cwd(), 'storage', filename);
 		const outputName = `${baseName}.${extension}`;
 		try {
+			const writeStream = createWriteStream(input);
+			await pipeline(data.Body as stream.Readable, writeStream);
+
 			const ffmpeg = ffmpegDownload(input, extension);
 
 			res.setHeader('Content-Disposition', `attachment; filename="${outputName}"`);
@@ -148,6 +211,14 @@ app.get('/download/:extension/:filename', auth, strictLimiter, async (req, res) 
 				console.error('ffmpeg error:', err);
 				if (!res.headersSent) {
 					res.status(500).end('FFmpeg failed');
+				}
+			});
+
+			res.on('close', async () => {
+				try {
+					await fs.unlink(input);
+				} catch (err) {
+					console.warn('Could not delete temp file:', err);
 				}
 			});
 		} catch (err) {
@@ -171,27 +242,52 @@ app.patch('/edit', strictLimiter, async (req, res) => {
 		res.status(404).json({ message: 'Cannot edit : video not found' });
 		return;
 	}
+	//tytah
+	let data: GetObjectCommandOutput;
 	const filePath = path.join(process.cwd(), 'storage', video.filename);
 	const tempOutput = path.join(process.cwd(), 'storage', 'temp_' + video.filename);
 	try {
-		await fs.access(filePath);
+		const getVideo = new GetObjectCommand({
+			Bucket: 'ephemvid',
+			Key: video.filename
+		});
+		data = await S3.send(getVideo);
+		const writeStream = createWriteStream(filePath);
+		await pipeline(data.Body as stream.Readable, writeStream);
 	} catch (err) {
-		console.error('Trying to edit file that doesnt exist: ', err);
+		console.error('Problems downloading file (edit endpoint): ', err);
 		res.status(404).json({ message: 'File not found' });
 		return;
 	}
 	try {
 		await ffmpegEdit(options, video.duration, filePath, tempOutput);
-		await fs.rename(tempOutput, filePath);
-		const info = await getInfo(filePath);
+		// await fs.rename(tempOutput, filePath);
+		const info = await getInfo(tempOutput);
 		db.prepare(`UPDATE videos SET duration = ?,size= ? WHERE id = ? `).run(info.duration, info.size, video.id);
+		const fileContent = await fs.readFile(tempOutput);
+		const uploadParams = {
+			Bucket: 'ephemvid',
+			Key: video.filename,
+			Body: fileContent,
+			ContentType: data.ContentType
+		};
+		await S3.send(new PutObjectCommand(uploadParams));
+		res.on('close', async () => {
+			try {
+				await fs.unlink(filePath);
+				await fs.unlink(tempOutput);
+			} catch (err) {
+				console.warn('Could not delete temp file:', err);
+			}
+		});
 		res.status(200).json({ message: 'succesfully edited video' });
 	} catch (err) {
 		console.error(err);
 		try {
+			await fs.unlink(filePath);
 			await fs.unlink(tempOutput);
-		} catch (unlinkErr) {
-			console.error('Failed to delete temp file:', unlinkErr);
+		} catch (err) {
+			console.warn('Could not delete temp file:', err);
 		}
 		if (err instanceof Error && err.message.includes('New bitrate is too low, increase bitrate or shorten the video')) {
 			res.status(400).json({ message: 'New bitrate is too low — increase bitrate or shorten the video.' });
@@ -208,19 +304,19 @@ app.delete('/delete/:id', softLimiter, async (req, res) => {
 		res.status(404).json({ message: "Video doesn't exist" });
 		return;
 	}
-	const filePath = path.join(process.cwd(), 'storage', result.filename);
 
 	try {
-		await fs.access(filePath);
-		await fs.unlink(filePath);
-	} catch {
-		console.warn('File not found on disk, deleting from DB anyway');
-		res.status(404).json({ message: "File doesn't exist" });
-		return;
+		const deleteParams = {
+			Bucket: 'ephemvid',
+			Key: result.filename
+		};
+		const data = await S3.send(new DeleteObjectCommand(deleteParams));
+		db.prepare('DELETE FROM videos WHERE id = ?').run(id);
+		res.status(200).json({ message: 'Video deleted' });
+	} catch (err) {
+		console.error(err);
+		res.status(500).json({ message: 'Could not delete file' });
 	}
-
-	db.prepare('DELETE FROM videos WHERE id = ?').run(id);
-	res.status(200).json({ message: 'Video deleted' });
 });
 
 if (process.env.SSL_ENABLE === 'true') {
