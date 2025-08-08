@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import cors from 'cors';
 import upload from './multer-config.js';
-import { getInfo, ffmpegEdit, ffmpegDownload } from './ffmpeg-functions.js';
+import { getInfo, ffmpegEdit, ffmpegDownload, addFlagFaststart } from './ffmpeg-functions.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { db_init, db } from './db.js';
@@ -55,11 +55,10 @@ const pipeline = util.promisify(stream.pipeline);
 
 //-----------------------------------------------------------------s3 config
 if (!process.env.ACCESS_KEY_ID || !process.env.SECRET_ACCESS_KEY) {
-	throw new Error('Missing CloudFlare credentials in environment variable');
+	throw new Error('Missing AWS credentials in environment variable');
 }
 const S3 = new S3Client({
-	region: 'auto',
-	endpoint: `https://${process.env.ACCOUNT_ID}.r2.cloudflarestorage.com`,
+	region: 'eu-north-1',
 	credentials: {
 		accessKeyId: process.env.ACCESS_KEY_ID,
 		secretAccessKey: process.env.SECRET_ACCESS_KEY
@@ -89,14 +88,17 @@ app.post('/upload', auth, strictLimiter, (req, res) => {
 		}
 
 		try {
+			await addFlagFaststart(req.file.path)
 			const info = await getInfo(req.file.path);
+
 			db.prepare('INSERT INTO videos (filename,created_at,duration,size,user_id) VALUES (?,?,?,?,?)').run(req.file.filename, Date.now(), info.duration, info.size, req.userId);
 			const fileContent = await fs.readFile(req.file.path);
 			const uploadParams = {
 				Bucket: 'ephemvid',
 				Key: req.file.filename,
 				Body: fileContent,
-				ContentType: req.file.mimetype
+				ContentType: req.file.mimetype,
+				ContentLength: info.size
 			};
 			const data = await S3.send(new PutObjectCommand(uploadParams));
 			res.status(200).json({
@@ -105,6 +107,7 @@ app.post('/upload', auth, strictLimiter, (req, res) => {
 		} catch (err) {
 			console.error(err);
 			res.status(500).json({ message: 'Error while processing file' });
+			return
 		} finally {
 			try {
 				await fs.unlink(req.file.path);
@@ -130,28 +133,8 @@ app.get('/file/single/:filename', softLimiter, async (req, res) => {
 		res.status(400).json({ message: 'Wrong filename' });
 		return;
 	}
+	res.status(302).redirect(process.env.CLOUDFRONT_URL + '/' + filename);
 
-	try {
-		const command = new GetObjectCommand({
-			Bucket: 'ephemvid',
-			Key: filename
-		});
-		const data = await S3.send(command);
-
-		if (data.ContentType) {
-			res.setHeader('Content-Type', data.ContentType);
-		}
-		if (data.ContentLength) {
-			res.setHeader('Content-Length', data.ContentLength.toString());
-		}
-		res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-
-		await pipeline(data.Body as stream.Readable, res);
-	} catch (err) {
-		console.error('Error streaming file:', err);
-		res.status(404).json({ message: 'File does not exist or cannot be read' });
-		return;
-	}
 });
 
 //download endpoint

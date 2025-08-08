@@ -2,6 +2,7 @@ import { exec, spawn } from 'child_process';
 import path from 'path';
 import { editOptions } from './interfaces';
 import { promisify } from 'util';
+import fs from 'fs';
 
 const execAsync = promisify(exec);
 
@@ -139,4 +140,27 @@ export function ffmpegDownload(inputPath: string, extension: string) {
 	args.push('-');
 
 	return spawn('ffmpeg', args);
+}
+
+export function addFlagFaststart (inputPath: string): Promise<void> {
+	return new Promise((resolve, reject) => {
+		if (path.extname(inputPath).toLowerCase() == '.mp4' || path.extname(inputPath).toLowerCase() == '.mov') {
+
+		const outputPath =path.join(process.cwd(),"storage","temp_" + path.basename(inputPath)) 
+		const command = `ffmpeg -i "${inputPath}" -map 0 -c copy -movflags +faststart  "${outputPath}"`;
+		exec(command, { timeout: 80000 }, (error, stdout, stderr) => {
+			if (error) {
+				console.error('FFmpeg error:', stderr || error.message);
+				return reject(error);
+			}
+			fs.rename(outputPath, inputPath,(err) => {
+				if (err) {
+					console.error('Error renaming file:', err);
+					return reject(err);
+				}
+				resolve();
+			})
+		
+		});}
+	});
 }
