@@ -18,7 +18,19 @@ import util from 'util';
 import stream from 'stream';
 import type { GetObjectCommandOutput } from '@aws-sdk/client-s3';
 import { createWriteStream, write } from 'fs';
-
+import { randomBytes } from 'crypto';
+//-----------------------------------------------------------------s3 config
+if (!process.env.ACCESS_KEY_ID || !process.env.SECRET_ACCESS_KEY) {
+	throw new Error('Missing AWS credentials in environment variable');
+}
+export const S3 = new S3Client({
+	region: 'eu-north-1',
+	credentials: {
+		accessKeyId: process.env.ACCESS_KEY_ID,
+		secretAccessKey: process.env.SECRET_ACCESS_KEY
+	}
+});
+//-------------------------------------------------------------------
 const strictLimiter = rateLimit({
 	windowMs: 60 * 1000,
 	max: 10,
@@ -29,6 +41,7 @@ const softLimiter = rateLimit({
 	max: 60,
 	message: 'Too many requests , try again later'
 });
+//-------------------------------------------------------------------
 
 const app = express();
 const port = process.env.PORT;
@@ -51,20 +64,10 @@ deleteOldFiles();
 setInterval(() => {
 	deleteOldFiles();
 }, 24 * 60 * 60 * 1000);
+
 const pipeline = util.promisify(stream.pipeline);
 
-//-----------------------------------------------------------------s3 config
-if (!process.env.ACCESS_KEY_ID || !process.env.SECRET_ACCESS_KEY) {
-	throw new Error('Missing AWS credentials in environment variable');
-}
-const S3 = new S3Client({
-	region: 'eu-north-1',
-	credentials: {
-		accessKeyId: process.env.ACCESS_KEY_ID,
-		secretAccessKey: process.env.SECRET_ACCESS_KEY
-	}
-});
-//-------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 //upload endpoint
 app.post('/upload', auth, strictLimiter, (req, res) => {
 	const videos = db.prepare(`SELECT COUNT(*) as count FROM videos WHERE user_id = ?`).get(req.userId) as { count: number };
@@ -132,6 +135,9 @@ app.get('/file/single/:filename', softLimiter, async (req, res) => {
 	if (filename.includes('..')) {
 		res.status(400).json({ message: 'Wrong filename' });
 		return;
+	}
+	if (!process.env.CLOUDFRONT_URL) {
+		throw new Error('Missing cloudfront URL in environment variable');
 	}
 	res.status(302).redirect(process.env.CLOUDFRONT_URL + '/' + filename);
 
@@ -246,15 +252,28 @@ app.patch('/edit', strictLimiter, async (req, res) => {
 		await ffmpegEdit(options, video.duration, filePath, tempOutput);
 		// await fs.rename(tempOutput, filePath);
 		const info = await getInfo(tempOutput);
-		db.prepare(`UPDATE videos SET duration = ?,size= ? WHERE id = ? `).run(info.duration, info.size, video.id);
+
+
+		const oldFilename = video.filename
+		const ext = path.extname(oldFilename);
+		const base = oldFilename.slice(0, -ext.length);
+		const cutBase = base.slice(0, -4);
+		const randomSuffix = randomBytes(2).toString('hex');
+		const newFilename = cutBase + randomSuffix + ext
+
+		db.prepare(`UPDATE videos SET filename = ?,duration = ?,size= ? WHERE id = ? `).run(newFilename,info.duration, info.size, video.id);
 		const fileContent = await fs.readFile(tempOutput);
-		const uploadParams = {
+		await S3.send(new PutObjectCommand({
 			Bucket: 'ephemvid',
-			Key: video.filename,
+			Key: newFilename,
 			Body: fileContent,
-			ContentType: data.ContentType
-		};
-		await S3.send(new PutObjectCommand(uploadParams));
+			ContentType: data.ContentType,
+			ContentLength: info.size
+		}));
+		await S3.send(new DeleteObjectCommand({
+			Bucket: 'ephemvid',
+			Key: oldFilename
+		}))
 		res.on('close', async () => {
 			try {
 				await fs.unlink(filePath);
@@ -263,7 +282,7 @@ app.patch('/edit', strictLimiter, async (req, res) => {
 				console.warn('Could not delete temp file:', err);
 			}
 		});
-		res.status(200).json({ message: 'succesfully edited video' });
+		res.status(200).json({ message: 'successfully edited video' });
 	} catch (err) {
 		console.error(err);
 		try {
