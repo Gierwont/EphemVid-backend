@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
-
+import fs from 'fs/promises'
 export const db = new Database('app.db');
+
 
 export function db_init() {
 	const create_table_users = `
@@ -28,6 +29,7 @@ export function db_init() {
 
 		db.exec(create_table_videos);
 		console.log('Videos table created or exists already');
+
 	} catch (err) {
 		console.error('Database initialization failed:', err);
 		process.exit(1);

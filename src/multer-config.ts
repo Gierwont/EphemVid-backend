@@ -3,10 +3,10 @@ import path from 'path';
 import { randomBytes } from 'crypto';
 
 const storage = multer.diskStorage({
-	destination: (req, file, cb) => {
+	destination: (_req, _file, cb) => {
 		cb(null, 'storage/');
 	},
-	filename: (req, file, cb) => {
+	filename: (_req, file, cb) => {
 		const extName = path.extname(file.originalname);
 		const sanitizeFilename = (name: string) => name.replace(/[^a-zA-Z0-9\-_.]/g, '');
 		const baseName = sanitizeFilename(path.basename(file.originalname, extName));
@@ -14,9 +14,8 @@ const storage = multer.diskStorage({
 		cb(null, `${baseName}_${randomSuffix}${extName}`);
 	}
 });
-// const storage = multer.memoryStorage();
 
-const fileFilter = (req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+const fileFilter = (_req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
 	const supportedMimetypes = [
 		'video/mp4',
 		'video/quicktime', // .mov

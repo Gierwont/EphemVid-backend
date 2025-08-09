@@ -96,14 +96,13 @@ app.post('/upload', auth, strictLimiter, (req, res) => {
 
 			db.prepare('INSERT INTO videos (filename,created_at,duration,size,user_id) VALUES (?,?,?,?,?)').run(req.file.filename, Date.now(), info.duration, info.size, req.userId);
 			const fileContent = await fs.readFile(req.file.path);
-			const uploadParams = {
+			await S3.send(new PutObjectCommand({
 				Bucket: 'ephemvid',
 				Key: req.file.filename,
 				Body: fileContent,
 				ContentType: req.file.mimetype,
 				ContentLength: info.size
-			};
-			const data = await S3.send(new PutObjectCommand(uploadParams));
+			}));
 			res.status(200).json({
 				message: 'File uploaded succesfully'
 			});
@@ -155,11 +154,10 @@ app.get('/download/:extension/:filename', auth, strictLimiter, async (req, res) 
 
 	let data: GetObjectCommandOutput;
 	try {
-		const command = new GetObjectCommand({
+		data = await S3.send(new GetObjectCommand({
 			Bucket: 'ephemvid',
 			Key: filename
-		});
-		data = await S3.send(command);
+		}));
 	} catch (err) {
 		console.error('Error reading file:', err);
 		res.status(404).json({ message: 'File does not exist or cannot be read' });
@@ -231,16 +229,14 @@ app.patch('/edit', strictLimiter, async (req, res) => {
 		res.status(404).json({ message: 'Cannot edit : video not found' });
 		return;
 	}
-	//tytah
 	let data: GetObjectCommandOutput;
 	const filePath = path.join(process.cwd(), 'storage', video.filename);
 	const tempOutput = path.join(process.cwd(), 'storage', 'temp_' + video.filename);
 	try {
-		const getVideo = new GetObjectCommand({
+		data = await S3.send(new GetObjectCommand({
 			Bucket: 'ephemvid',
 			Key: video.filename
-		});
-		data = await S3.send(getVideo);
+		}));
 		const writeStream = createWriteStream(filePath);
 		await pipeline(data.Body as stream.Readable, writeStream);
 	} catch (err) {
@@ -250,7 +246,6 @@ app.patch('/edit', strictLimiter, async (req, res) => {
 	}
 	try {
 		await ffmpegEdit(options, video.duration, filePath, tempOutput);
-		// await fs.rename(tempOutput, filePath);
 		const info = await getInfo(tempOutput);
 
 
@@ -261,7 +256,7 @@ app.patch('/edit', strictLimiter, async (req, res) => {
 		const randomSuffix = randomBytes(2).toString('hex');
 		const newFilename = cutBase + randomSuffix + ext
 
-		db.prepare(`UPDATE videos SET filename = ?,duration = ?,size= ? WHERE id = ? `).run(newFilename,info.duration, info.size, video.id);
+		db.prepare(`UPDATE videos SET filename = ?,duration = ?,size= ? WHERE id = ? `).run(newFilename, info.duration, info.size, video.id);
 		const fileContent = await fs.readFile(tempOutput);
 		await S3.send(new PutObjectCommand({
 			Bucket: 'ephemvid',
@@ -312,7 +307,7 @@ app.delete('/delete/:id', softLimiter, async (req, res) => {
 			Bucket: 'ephemvid',
 			Key: result.filename
 		};
-		const data = await S3.send(new DeleteObjectCommand(deleteParams));
+		await S3.send(new DeleteObjectCommand(deleteParams));
 		db.prepare('DELETE FROM videos WHERE id = ?').run(id);
 		res.status(200).json({ message: 'Video deleted' });
 	} catch (err) {
@@ -321,17 +316,36 @@ app.delete('/delete/:id', softLimiter, async (req, res) => {
 	}
 });
 
-if (process.env.SSL_ENABLE === 'true') {
-	const sslOptions = {
-		key: await fs.readFile(process.env.KEY_PATH!),
-		cert: await fs.readFile(process.env.CERT_PATH!)
-	};
-
-	https.createServer(sslOptions, app).listen(port, () => {
-		console.log(`SSL server running at https://localhost:${port}`);
-	});
-} else {
-	app.listen(port, () => {
-		console.log(`Server running at http://localhost:${port}`);
-	});
+async function startServer() {
+	if (process.env.SSL_ENABLE === 'true') {
+		const sslOptions = {
+			key: await fs.readFile(process.env.KEY_PATH!),
+			cert: await fs.readFile(process.env.CERT_PATH!)
+		};
+		https.createServer(sslOptions, app).listen(port, () => {
+			console.log(`SSL server running at https://localhost:${port}`);
+		});
+	} else {
+		app.listen(port, () => {
+			console.log(`Server running at http://localhost:${port}`);
+		});
+	}
 }
+
+
+(async () => {
+
+	try {
+		await fs.access('storage');
+	} catch {
+		await fs.mkdir('storage', { recursive: true });
+		console.log('Storage folder created because it did not exist');
+	}
+	try {
+		await startServer();
+	} catch (err) {
+		console.error('Failed to start server:', err);
+		process.exit(1);
+	}
+})();
+

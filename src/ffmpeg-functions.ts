@@ -160,7 +160,7 @@ export function addFlagFaststart (inputPath: string): Promise<void> {
 				}
 				resolve();
 			})
-		
+		resolve()
 		});}
 	});
 }
