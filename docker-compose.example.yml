@@ -3,7 +3,7 @@ services:
     restart: always
     ports:
       - 3000:3000
-    build: .
+    image: gierwin/ephemvid:latest
     volumes:
       - /etc/letsencrypt/live/[domain]/fullchain.pem:/certs/fullchain.pem:ro
       - /etc/letsencrypt/live/[domain]/privkey.pem:/certs/privkey.pem:ro
