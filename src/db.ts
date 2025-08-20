@@ -1,6 +1,5 @@
 import Database from 'better-sqlite3';
-import fs from 'fs/promises'
-export const db = new Database('app.db');
+export const db = new Database('app.db',{fileMustExist:true});
 
 
 export function db_init() {

@@ -52,7 +52,7 @@ export function getInfo(path: string): Promise<{ duration: number; size: number 
 
 export function ffmpegEdit(options: editOptions, duration: number, inputPath: string, outputPath: string) {
 	return new Promise<void>(async (resolve, reject) => {
-		let command = `ffmpeg -i "${inputPath}"`;
+		let command = `ffmpeg -hwaccel cuda -i "${inputPath}"`;
 		//cut video
 		if (options.startTime !== undefined && options.endTime !== undefined) {
 			if (options.startTime > options.endTime || options.startTime < 0 || options.endTime < 0) {
@@ -92,9 +92,11 @@ export function ffmpegEdit(options: editOptions, duration: number, inputPath: st
 			}
 
 			if (path.extname(outputPath).toLowerCase() === '.webm') {
+			
 				command += ` -c:v libvpx-vp9 -b:v ${videoBitrate}k -crf 24 -maxrate ${videoBitrate}k -bufsize ${videoBitrate * 2}k -c:a libopus -b:a ${audioBitrate}k`;
 			} else {
-				command += ` -c:v libx264 -preset fast -b:v ${videoBitrate}k -maxrate ${videoBitrate}k -bufsize ${videoBitrate * 2}k -movflags +faststart -c:a aac -b:a ${audioBitrate}k`;
+				command += ` -c:v h264_nvenc -preset fast -b:v ${videoBitrate}k -maxrate ${videoBitrate}k -bufsize ${videoBitrate * 2}k -movflags +faststart -c:a aac -b:a ${audioBitrate}k`;
+				// command += ` -c:v libx264 -preset fast -b:v ${videoBitrate}k -maxrate ${videoBitrate}k -bufsize ${videoBitrate * 2}k -movflags +faststart -c:a aac -b:a ${audioBitrate}k`;
 			}
 		}
 
@@ -111,7 +113,7 @@ export function ffmpegEdit(options: editOptions, duration: number, inputPath: st
 
 export function ffmpegDownload(inputPath: string, extension: string) {
 	const outputFormat = extension.toLowerCase();
-	const args = ['-i', inputPath];
+	const args = ['-hwaccel','cuda','-i', inputPath,];
 	args.push('-movflags', 'frag_keyframe+empty_moov');
 
 	switch (outputFormat) {
@@ -119,16 +121,16 @@ export function ffmpegDownload(inputPath: string, extension: string) {
 			args.push('-f', 'webm', '-c:v', 'libvpx-vp9', '-deadline', 'realtime', '-speed', '4', '-c:a', 'libopus');
 			break;
 		case 'mp4':
-			args.push('-f', 'mp4', '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart');
+			args.push('-f', 'mp4', '-c:v', 'h264_nvenc', '-c:a', 'aac', '-movflags', '+faststart');
 			break;
 		case 'mkv':
-			args.push('-f', 'matroska', '-c:v', 'libx264', '-c:a', 'aac');
+			args.push('-f', 'matroska', '-c:v', 'h264_nvenc', '-c:a', 'aac');
 			break;
 		case 'avi':
 			args.push('-f', 'avi', '-c:v', 'mpeg4', '-c:a', 'mp3');
 			break;
 		case 'mov':
-			args.push('-f', 'mov', '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart');
+			args.push('-f', 'mov', '-c:v', 'h264_nvenc', '-c:a', 'aac', '-movflags', '+faststart');
 			break;
 		case 'gif':
 			args.push('-vf', 'fps=15,scale=640:-1:flags=lanczos', '-f', 'gif', '-loop', '0', '-an', '-pix_fmt', 'rgb24');
@@ -147,7 +149,7 @@ export function addFlagFaststart (inputPath: string): Promise<void> {
 		if (path.extname(inputPath).toLowerCase() == '.mp4' || path.extname(inputPath).toLowerCase() == '.mov') {
 
 		const outputPath =path.join(process.cwd(),"storage","temp_" + path.basename(inputPath)) 
-		const command = `ffmpeg -i "${inputPath}" -map 0 -c copy -movflags +faststart  "${outputPath}"`;
+		const command = `ffmpeg -hwaccel cuda -i "${inputPath}" -map 0 -c copy -movflags +faststart -threads 2 "${outputPath}"`;
 		exec(command, { timeout: 80000 }, (error, stdout, stderr) => {
 			if (error) {
 				console.error('FFmpeg error:', stderr || error.message);
@@ -160,7 +162,7 @@ export function addFlagFaststart (inputPath: string): Promise<void> {
 				}
 				resolve();
 			})
-		resolve()
+		// resolve()
 		});}
 	});
 }
