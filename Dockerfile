@@ -1,10 +1,13 @@
-FROM node:24.4 
+FROM alpine
+
 WORKDIR /app
-
 COPY . .
-RUN npm i 
-RUN npm run build 
 
-EXPOSE 3000
+RUN apk add --no-cache ffmpeg nodejs npm
+RUN npm i
+RUN npm run build
 
-CMD ["npm","start"]
+# Get rid of npm because we don't need it
+RUN apk del npm
+
+CMD ["node", "dist/index.js"] 
