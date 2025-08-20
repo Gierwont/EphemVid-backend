@@ -1,13 +1,15 @@
-FROM alpine
+FROM nvidia/cuda:12.2.0-base-ubuntu22.04
 
 WORKDIR /app
 COPY . .
 
-RUN apk add --no-cache ffmpeg nodejs npm
-RUN npm i
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install
 RUN npm run build
 
-# Get rid of npm because we don't need it
-RUN apk del npm
-
-CMD ["node", "dist/index.js"] 
+CMD ["node", "dist/index.js"]
