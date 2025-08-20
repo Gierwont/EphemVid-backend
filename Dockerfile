@@ -1,14 +1,14 @@
-FROM nvidia/cuda:13.0.1-base-ubuntu22.04
-
-RUN apt-get update && apt-get install -y curl \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+FROM alpine 
 
 WORKDIR /app
 COPY . .
 
-RUN npm install
-RUN npm run build
+RUN apk add --no-cache ffmpeg nodejs npm 
+
+RUN npm i
+RUN npm run build 
+
+# Get rid of npm because we don't need it
+RUN apk del npm
 
 CMD ["node", "dist/index.js"]
